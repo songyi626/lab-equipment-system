@@ -27,18 +27,18 @@
     {% endif %}
 
     {% if is_admin %}
-    <!-- 只有最高管理員能新增機台與成員 -->
+    <!-- 1. 新增設備與新增成員區塊 (僅最高管理員可見) -->
     <div class="grid md:grid-cols-2 gap-6">
       <div class="bg-white p-6 rounded-xl border shadow-sm">
         <h2 class="text-lg font-bold text-slate-800 mb-4">＋ 新增實驗設備</h2>
         <form action="/admin/add-equipment" method="post" class="space-y-3">
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">設備名稱</label>
-            <input type="text" name="name" required placeholder="如：CVD 晶體成長爐" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <input type="text" name="name" required placeholder="如：CVD 晶體成長爐" class="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">擺放位置</label>
-            <input type="text" name="location" placeholder="如：302 實驗室" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <input type="text" name="location" placeholder="如：302 實驗室" class="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
           </div>
           <button type="submit" class="w-full bg-slate-800 hover:bg-slate-900 text-white py-2 rounded-lg text-sm font-medium">確認建立設備</button>
         </form>
@@ -50,7 +50,7 @@
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="block text-xs font-semibold text-slate-600 mb-1">姓名</label>
-              <input type="text" name="name" required placeholder="如：王大明" class="w-full border rounded-lg px-3 py-2 text-sm">
+              <input type="text" name="name" required placeholder="如：王大明" class="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-600 mb-1">角色</label>
@@ -62,19 +62,57 @@
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">Email (帳號)</label>
-            <input type="email" name="email" required placeholder="student@lab.edu.tw" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <input type="email" name="email" required placeholder="student@lab.edu.tw" class="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">初始密碼</label>
-            <input type="password" name="password" required placeholder="••••••••" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <input type="password" name="password" required placeholder="••••••••" class="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
           </div>
           <button type="submit" class="w-full bg-slate-800 hover:bg-slate-900 text-white py-2 rounded-lg text-sm font-medium">建立帳號</button>
         </form>
       </div>
     </div>
+
+    <!-- 2. 現有設備列表與刪除管理 (補回此區塊) -->
+    <div class="bg-white p-6 rounded-xl border shadow-sm">
+      <h2 class="text-lg font-bold text-slate-800 mb-4">現有設備列表與刪除管理</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full border-collapse text-left text-sm">
+          <thead>
+            <tr class="bg-slate-50 border-b text-slate-600">
+              <th class="p-3 w-16">編號</th>
+              <th class="p-3">設備名稱</th>
+              <th class="p-3">擺放地點</th>
+              <th class="p-3 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for eq in equipments %}
+            <tr class="border-b hover:bg-slate-50/50">
+              <td class="p-3 text-slate-400 font-mono">#{{ eq.id }}</td>
+              <td class="p-3 font-semibold text-slate-800">{{ eq.name }}</td>
+              <td class="p-3 text-slate-500">{{ eq.location or '未填寫' }}</td>
+              <td class="p-3 text-right">
+                <form action="/admin/delete-equipment" method="post" class="inline" onsubmit="return confirm('警告：確定要刪除「{{ eq.name }}」嗎？\n此機台的所有預約紀錄與授權將會一併被清除！');">
+                  <input type="hidden" name="equipment_id" value="{{ eq.id }}">
+                  <button type="submit" class="text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded text-xs font-semibold border border-rose-200">
+                    刪除設備
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="4" class="p-4 text-center text-slate-400">目前尚無任何設備</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
     {% endif %}
 
-    <!-- 開通成員機台操作權限 -->
+    <!-- 3. 開通成員機台操作權限 -->
     <div class="bg-white p-6 rounded-xl border shadow-sm">
       <h2 class="text-lg font-bold text-slate-800 mb-4">開通／指派機台權限</h2>
       <form action="/admin/grant-permission" method="post" class="grid md:grid-cols-3 gap-4 items-end">
@@ -108,7 +146,7 @@
       </form>
     </div>
 
-    <!-- 成員目前權限對照與解除清單 -->
+    <!-- 4. 成員目前權限對照與解除清單 -->
     <div class="bg-white p-6 rounded-xl border shadow-sm">
       <h2 class="text-lg font-bold text-slate-800 mb-4">實驗室成員機台權限列表 (可直接解除)</h2>
       <div class="space-y-3">
@@ -122,7 +160,6 @@
             {% endif %}
           </div>
 
-          <!-- 列出該使用者擁有的設備標籤與解除按鈕 -->
           <div class="flex flex-wrap gap-2">
             {% if u.role != 'ADMIN' %}
               {% for eq in u.allowed_equipments %}
