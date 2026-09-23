@@ -72,12 +72,10 @@
           {% for slot in slots %}
           {% set slot_idx = loop.index0 %}
           <tr class="border-b hover:bg-slate-50/50">
-            <!-- 時段標籤 -->
             <td class="p-3 text-center font-medium text-xs text-slate-500 bg-slate-50 border-r whitespace-nowrap">
               {{ slot[0] }}<br>~<br>{{ slot[1] }}
             </td>
 
-            <!-- 每一天的預約格子 -->
             {% for d in week_dates %}
             {% set date_str = d.strftime('%Y-%m-%d') %}
             {% set booking = bookings_map.get((date_str, slot[0])) %}
@@ -85,7 +83,7 @@
               {% if booking %}
                 <div class="bg-rose-50 border border-rose-200 p-2 rounded-lg text-xs text-left h-full flex flex-col justify-between shadow-sm">
                   <div>
-                    <span class="font-bold text-rose-700 block truncate">{{ booking.user.name }}</span>
+                    <span class="font-bold text-rose-700 block truncate">{{ booking.booker_name or booking.user.name }}</span>
                     <span class="text-slate-500 block truncate text-[11px]">{{ booking.purpose or '實驗預約' }}</span>
                   </div>
                   {% if current_user.role == 'ADMIN' or current_user.id == booking.user_id %}
@@ -126,6 +124,14 @@
         <input type="hidden" name="week_offset" value="{{ week_offset }}">
         <input type="hidden" name="date_str" id="modalDateStr">
         <input type="hidden" name="slot_idx" id="modalSlotIdx">
+
+        <!-- 必填預約人姓名 -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">
+            預約人姓名 <span class="text-rose-500">*</span>
+          </label>
+          <input type="text" name="user_name" required value="{{ current_user.name }}" placeholder="請輸入姓名" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
 
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1">實驗樣品 / 目的說明 (選填)</label>
