@@ -17,8 +17,18 @@ SECRET_KEY = "LAB_RESERVATION_SUPER_SECRET_KEY"
 ALGORITHM = "HS256"
 COOKIE_NAME = "lab_token"
 
-DATABASE_URL = "sqlite:///./lab_reservation.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# 自動讀取 Render/Supabase 雲端資料庫網址，若無設定則退回本機 SQLite
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./lab_reservation.db")
+
+# 修正部分雲端資料庫前綴相容性問題 (postgres:// -> postgresql://)
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+if "sqlite" in DATABASE_URL:
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -281,6 +291,7 @@ def cancel_booking(
     db.commit()
     return RedirectResponse(url=f"/calendar?equipment_id={equipment_id}&week_offset={week_offset}", status_code=303)
 
+# ================= 管理員介面與路由 =================
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(
     request: Request,
@@ -368,10 +379,9 @@ def admin_grant_perm(
         db.commit()
     return RedirectResponse(url="/admin", status_code=303)
 
-# 系統啟動事件：保證先建表，再檢查管理員
+# 系統啟動事件：自動在 Supabase 建立所有資料表與管理員
 @app.on_event("startup")
 def init_data():
-    # 關鍵修復：啟動時先強制建立所有資料表，避免 SQLite no such table 錯誤
     Base.metadata.create_all(bind=engine)
     
     db = SessionLocal()
