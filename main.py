@@ -12,15 +12,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 import jwt
 
-# ================= 基本配置 =================
 SECRET_KEY = "LAB_RESERVATION_SUPER_SECRET_KEY"
 ALGORITHM = "HS256"
 COOKIE_NAME = "lab_token"
 
-# 自動讀取 Render/Supabase 雲端資料庫網址，若無設定則退回本機 SQLite
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./lab_reservation.db")
-
-# 修正部分雲端資料庫前綴相容性問題 (postgres:// -> postgresql://)
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -50,8 +46,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 # ================= 資料庫模型 =================
+# 一般操作權限
 user_equipment_permissions = Table(
     "user_equipment_permissions",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("equipment_id", Integer, ForeignKey("equipments.id"), primary_key=True)
+)
+
+# 機台負責人 (Superuser) 權限：負責人有權開通該機台給別人
+user_equipment_superusers = Table(
+    "user_equipment_superusers",
     Base.metadata,
     Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
     Column("equipment_id", Integer, ForeignKey("equipments.id"), primary_key=True)
@@ -63,11 +68,14 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
-    role = Column(String, default="USER")
+    role = Column(String, default="USER")  # "ADMIN" 或 "USER"
     is_active = Column(Boolean, default=True)
 
     allowed_equipments = relationship(
         "Equipment", secondary=user_equipment_permissions, back_populates="authorized_users"
+    )
+    superuser_equipments = relationship(
+        "Equipment", secondary=user_equipment_superusers, back_populates="superusers"
     )
     bookings = relationship("Booking", back_populates="user")
 
@@ -79,6 +87,9 @@ class Equipment(Base):
 
     authorized_users = relationship(
         "User", secondary=user_equipment_permissions, back_populates="allowed_equipments"
+    )
+    superusers = relationship(
+        "User", secondary=user_equipment_superusers, back_populates="superuser_equipments"
     )
     bookings = relationship("Booking", back_populates="equipment")
 
@@ -139,11 +150,11 @@ def index(user: Optional[User] = Depends(get_current_user_from_cookie)):
     return RedirectResponse(url="/calendar")
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, error: Optional[str] = None):
+def login_page(request: Request, error: Optional[str] = None, msg: Optional[str] = None):
     return templates.TemplateResponse(
         request=request,
         name="login.html",
-        context={"error": error}
+        context={"error": error, "msg": msg}
     )
 
 @app.post("/login")
@@ -166,6 +177,44 @@ def login_post(
     res.set_cookie(key=COOKIE_NAME, value=token, httponly=True)
     return res
 
+# 登入介面自主註冊帳號
+@app.post("/register")
+def register_post(
+    name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        return RedirectResponse(url="/login?error=此 Email 已註冊過，請直接登入", status_code=303)
+
+    new_user = User(
+        name=name.strip(),
+        email=email.strip().lower(),
+        hashed_password=hash_password(password),
+        role="USER"
+    )
+    db.add(new_user)
+    db.commit()
+    return RedirectResponse(url="/login?msg=註冊成功，請登入！", status_code=303)
+
+# 更改密碼路由
+@app.post("/change-password")
+def change_password(
+    old_password: str = Form(...),
+    new_password: str = Form(...),
+    redirect_to: str = Form("/calendar"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(login_required)
+):
+    if not verify_password(old_password, current_user.hashed_password):
+        return RedirectResponse(url=f"{redirect_to}?error=舊密碼輸入錯誤", status_code=303)
+    
+    current_user.hashed_password = hash_password(new_password)
+    db.commit()
+    return RedirectResponse(url=f"{redirect_to}?msg=密碼修改成功！", status_code=303)
+
 @app.get("/logout")
 def logout():
     res = RedirectResponse(url="/login", status_code=303)
@@ -187,13 +236,18 @@ def calendar_view(
     request: Request,
     equipment_id: Optional[int] = None,
     week_offset: int = 0,
+    msg: Optional[str] = None,
+    error: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(login_required)
 ):
+    # 管理員可看全部；一般人看自己有權限的設備（含負責人設備）
     if current_user.role == "ADMIN":
         equipments = db.query(Equipment).all()
     else:
-        equipments = current_user.allowed_equipments
+        # 合併 allowed_equipments 與 superuser_equipments
+        equip_set = set(current_user.allowed_equipments) | set(current_user.superuser_equipments)
+        equipments = list(equip_set)
 
     selected_equipment = None
     if equipments:
@@ -221,6 +275,8 @@ def calendar_view(
             key = (b.start_time.strftime("%Y-%m-%d"), b.start_time.strftime("%H:%M"))
             bookings_map[key] = b
 
+    is_superuser_for_any = (current_user.role == "ADMIN") or (len(current_user.superuser_equipments) > 0)
+
     return templates.TemplateResponse(
         request=request,
         name="calendar.html",
@@ -231,7 +287,10 @@ def calendar_view(
             "week_dates": week_dates,
             "slots": SLOTS,
             "bookings_map": bookings_map,
-            "week_offset": week_offset
+            "week_offset": week_offset,
+            "is_superuser_for_any": is_superuser_for_any,
+            "msg": msg,
+            "error": error
         }
     )
 
@@ -247,7 +306,8 @@ def make_booking(
     current_user: User = Depends(login_required)
 ):
     equip = db.query(Equipment).filter(Equipment.id == equipment_id).first()
-    if current_user.role != "ADMIN" and equip not in current_user.allowed_equipments:
+    has_perm = (current_user.role == "ADMIN") or (equip in current_user.allowed_equipments) or (equip in current_user.superuser_equipments)
+    if not has_perm:
         raise HTTPException(status_code=403, detail="您沒有操作此設備的權限")
 
     start_str, end_str = SLOTS[slot_idx]
@@ -272,8 +332,9 @@ def make_booking(
     )
     db.add(new_booking)
     db.commit()
-    return RedirectResponse(url=f"/calendar?equipment_id={equipment_id}&week_offset={week_offset}", status_code=303)
+    return RedirectResponse(url=f"/calendar?equipment_id={equipment_id}&week_offset={week_offset}&msg=預約成功！", status_code=303)
 
+# 嚴格取消限制：僅本人與管理員可取消
 @app.post("/cancel-booking")
 def cancel_booking(
     booking_id: int = Form(...),
@@ -286,29 +347,42 @@ def cancel_booking(
     if not b:
         raise HTTPException(status_code=404, detail="預約不存在")
     if current_user.role != "ADMIN" and b.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="您只能取消自己的預約")
+        return RedirectResponse(url=f"/calendar?equipment_id={equipment_id}&week_offset={week_offset}&error=權限不足！只有預約者本人與管理員可取消預約", status_code=303)
     b.status = "CANCELLED"
     db.commit()
-    return RedirectResponse(url=f"/calendar?equipment_id={equipment_id}&week_offset={week_offset}", status_code=303)
+    return RedirectResponse(url=f"/calendar?equipment_id={equipment_id}&week_offset={week_offset}&msg=已成功取消預約", status_code=303)
 
-# ================= 管理員介面與路由 =================
+# ================= 管理後台（支援 ADMIN 與機台負責人 Superuser） =================
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(
     request: Request,
+    msg: Optional[str] = None,
+    error: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(login_required)
 ):
-    if current_user.role != "ADMIN":
-        raise HTTPException(status_code=403, detail="僅限管理員進入")
+    is_admin = (current_user.role == "ADMIN")
+    is_super = len(current_user.superuser_equipments) > 0
+    if not (is_admin or is_super):
+        raise HTTPException(status_code=403, detail="您沒有管理權限")
+
     users = db.query(User).all()
-    equipments = db.query(Equipment).all()
+    # ADMIN 可管理所有機台；Superuser 只能管理自己被指派的機台
+    if is_admin:
+        manageable_equipments = db.query(Equipment).all()
+    else:
+        manageable_equipments = current_user.superuser_equipments
+
     return templates.TemplateResponse(
         request=request,
         name="admin.html",
         context={
             "current_user": current_user,
             "users": users,
-            "equipments": equipments
+            "equipments": manageable_equipments,
+            "is_admin": is_admin,
+            "msg": msg,
+            "error": error
         }
     )
 
@@ -320,11 +394,11 @@ def admin_add_equipment(
     current_user: User = Depends(login_required)
 ):
     if current_user.role != "ADMIN":
-        raise HTTPException(status_code=403, detail="僅限管理員")
+        raise HTTPException(status_code=403, detail="僅最高管理員可新增設備")
     eq = Equipment(name=name, location=location)
     db.add(eq)
     db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin?msg=設備建立成功", status_code=303)
 
 @app.post("/admin/delete-equipment")
 def admin_delete_equipment(
@@ -333,14 +407,15 @@ def admin_delete_equipment(
     current_user: User = Depends(login_required)
 ):
     if current_user.role != "ADMIN":
-        raise HTTPException(status_code=403, detail="僅限管理員")
+        raise HTTPException(status_code=403, detail="僅最高管理員可刪除設備")
     eq = db.query(Equipment).filter(Equipment.id == equipment_id).first()
     if eq:
         db.query(Booking).filter(Booking.equipment_id == equipment_id).delete()
         eq.authorized_users.clear()
+        eq.superusers.clear()
         db.delete(eq)
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin?msg=設備已刪除", status_code=303)
 
 @app.post("/admin/add-user")
 def admin_add_user(
@@ -352,38 +427,88 @@ def admin_add_user(
     current_user: User = Depends(login_required)
 ):
     if current_user.role != "ADMIN":
-        raise HTTPException(status_code=403, detail="僅限管理員")
+        raise HTTPException(status_code=403, detail="僅最高管理員可手動建帳號")
     new_u = User(
-        name=name,
-        email=email,
+        name=name.strip(),
+        email=email.strip().lower(),
         hashed_password=hash_password(password),
         role=role
     )
     db.add(new_u)
     db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin?msg=使用者新增成功", status_code=303)
 
+# 授權功能（ADMIN 或該機台 Superuser 皆可開通）
 @app.post("/admin/grant-permission")
 def admin_grant_perm(
     user_id: int = Form(...),
     equipment_id: int = Form(...),
+    as_superuser: bool = Form(False),  # 是否設為機台負責人 (Superuser)
     db: Session = Depends(get_db),
     current_user: User = Depends(login_required)
 ):
-    if current_user.role != "ADMIN":
-        raise HTTPException(status_code=403, detail="僅限管理員")
-    target_user = db.query(User).filter(User.id == user_id).first()
     equip = db.query(Equipment).filter(Equipment.id == equipment_id).first()
-    if target_user and equip and equip not in target_user.allowed_equipments:
-        target_user.allowed_equipments.append(equip)
-        db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    if not equip:
+        raise HTTPException(status_code=404, detail="設備不存在")
 
-# 系統啟動事件：自動在 Supabase 建立所有資料表與管理員
+    can_manage = (current_user.role == "ADMIN") or (equip in current_user.superuser_equipments)
+    if not can_manage:
+        raise HTTPException(status_code=403, detail="您沒有管理此機台授權的權限")
+
+    # 只有最高管理員能指定 Superuser
+    if as_superuser and current_user.role != "ADMIN":
+        raise HTTPException(status_code=403, detail="只有最高管理員可以指派機台負責人")
+
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if target_user:
+        if as_superuser:
+            if equip not in target_user.superuser_equipments:
+                target_user.superuser_equipments.append(equip)
+            if equip not in target_user.allowed_equipments:
+                target_user.allowed_equipments.append(equip)
+        else:
+            if equip not in target_user.allowed_equipments:
+                target_user.allowed_equipments.append(equip)
+        db.commit()
+
+    return RedirectResponse(url="/admin?msg=授權成功！", status_code=303)
+
+# 解除機台權限
+@app.post("/admin/revoke-permission")
+def admin_revoke_perm(
+    user_id: int = Form(...),
+    equipment_id: int = Form(...),
+    revoke_type: str = Form("operator"),  # "operator" 或 "superuser"
+    db: Session = Depends(get_db),
+    current_user: User = Depends(login_required)
+):
+    equip = db.query(Equipment).filter(Equipment.id == equipment_id).first()
+    if not equip:
+        raise HTTPException(status_code=404, detail="設備不存在")
+
+    can_manage = (current_user.role == "ADMIN") or (equip in current_user.superuser_equipments)
+    if not can_manage:
+        raise HTTPException(status_code=403, detail="您沒有解除此設備權限的資格")
+
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if target_user:
+        if revoke_type == "superuser":
+            if current_user.role != "ADMIN":
+                raise HTTPException(status_code=403, detail="只有最高管理員可解除負責人身份")
+            if equip in target_user.superuser_equipments:
+                target_user.superuser_equipments.remove(equip)
+        else:
+            if equip in target_user.allowed_equipments:
+                target_user.allowed_equipments.remove(equip)
+            if equip in target_user.superuser_equipments:
+                target_user.superuser_equipments.remove(equip)
+        db.commit()
+
+    return RedirectResponse(url="/admin?msg=已解除該權限！", status_code=303)
+
 @app.on_event("startup")
 def init_data():
     Base.metadata.create_all(bind=engine)
-    
     db = SessionLocal()
     admin_email = "admin@lab.edu.tw"
     admin = db.query(User).filter(User.email == admin_email).first()

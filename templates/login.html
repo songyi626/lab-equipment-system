@@ -5,38 +5,81 @@
   <title>實驗室設備預約系統 - 登入</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-100 flex items-center justify-center min-h-screen">
+<body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
   <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md border border-slate-200">
-    <div class="text-center mb-8">
+    <div class="text-center mb-6">
       <h1 class="text-2xl font-bold text-slate-800">實驗室設備預約系統</h1>
-      <p class="text-slate-500 text-sm mt-1">請輸入帳號密碼以進行預約</p>
+      <p class="text-slate-500 text-sm mt-1">請登入帳號以進行機台預約</p>
     </div>
 
+    <!-- 提示與錯誤訊息 -->
     {% if error %}
     <div class="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 border border-red-200">
       {{ error }}
     </div>
     {% endif %}
+    {% if msg %}
+    <div class="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-sm mb-4 border border-emerald-200">
+      {{ msg }}
+    </div>
+    {% endif %}
 
-    <form action="/login" method="post" class="space-y-4">
-      <div>
-        <label class="block text-sm font-medium text-slate-700 mb-1">電子信箱 (帳號)</label>
-        <input type="email" name="email" required placeholder="admin@lab.edu.tw" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <!-- 登入表單 -->
+    <div id="loginSection">
+      <form action="/login" method="post" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">電子信箱 (帳號)</label>
+          <input type="email" name="email" required placeholder="name@lab.edu.tw" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">密碼</label>
+          <input type="password" name="password" required placeholder="••••••••" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+        </div>
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition duration-200 text-sm">
+          登入系統
+        </button>
+      </form>
+      <div class="mt-4 text-center">
+        <button onclick="toggleAuth(true)" class="text-sm text-blue-600 hover:underline">還沒有帳號？立即註冊成員帳號</button>
       </div>
-      <div>
-        <label class="block text-sm font-medium text-slate-700 mb-1">密碼</label>
-        <input type="password" name="password" required placeholder="••••••••" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-      </div>
-      <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition duration-200">
-        登入系統
-      </button>
-    </form>
+    </div>
 
-    <div class="mt-6 p-3 bg-blue-50 text-blue-800 text-xs rounded-lg border border-blue-200">
-      <p class="font-semibold">預設管理員帳號：</p>
+    <!-- 註冊表單 (預設隱藏) -->
+    <div id="registerSection" class="hidden">
+      <form action="/register" method="post" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">您的真實姓名</label>
+          <input type="text" name="name" required placeholder="如：王大明" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">電子信箱 (作為帳號)</label>
+          <input type="email" name="email" required placeholder="student@lab.edu.tw" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">設定登入密碼</label>
+          <input type="password" name="password" required placeholder="至少 6 位密碼" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+        </div>
+        <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 rounded-lg transition duration-200 text-sm">
+          確認註冊
+        </button>
+      </form>
+      <div class="mt-4 text-center">
+        <button onclick="toggleAuth(false)" class="text-sm text-slate-500 hover:underline">已有帳號？返回登入</button>
+      </div>
+    </div>
+
+    <div class="mt-6 p-3 bg-slate-50 text-slate-600 text-xs rounded-lg border">
+      <p class="font-semibold text-slate-700">預設最高管理員：</p>
       <p>帳號：<code>admin@lab.edu.tw</code></p>
       <p>密碼：<code>Admin1234</code></p>
     </div>
   </div>
+
+  <script>
+    function toggleAuth(showRegister) {
+      document.getElementById('loginSection').classList.toggle('hidden', showRegister);
+      document.getElementById('registerSection').classList.toggle('hidden', !showRegister);
+    }
+  </script>
 </body>
 </html>

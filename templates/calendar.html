@@ -14,15 +14,31 @@
         {{ current_user.name }} ({{ current_user.role }})
       </span>
     </div>
-    <div class="space-x-4">
-      {% if current_user.role == 'ADMIN' %}
-      <a href="/admin" class="text-sm bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1.5 rounded-md font-medium border border-indigo-200">管理後台</a>
+    <div class="flex items-center space-x-3">
+      <button onclick="openChangePasswordModal()" class="text-xs text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded border">
+        修改密碼
+      </button>
+      {% if is_superuser_for_any %}
+      <a href="/admin" class="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1.5 rounded font-medium border border-indigo-200">
+        {% if current_user.role == 'ADMIN' %}管理後台{% else %}機台權限審核後台{% endif %}
+      </a>
       {% endif %}
-      <a href="/logout" class="text-sm text-red-600 hover:underline">登出</a>
+      <a href="/logout" class="text-xs text-red-600 hover:underline">登出</a>
     </div>
   </nav>
 
   <main class="max-w-7xl mx-auto p-6">
+    {% if error %}
+    <div class="bg-red-50 text-red-700 p-3 rounded-lg text-sm mb-4 border border-red-200">
+      {{ error }}
+    </div>
+    {% endif %}
+    {% if msg %}
+    <div class="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-sm mb-4 border border-emerald-200">
+      {{ msg }}
+    </div>
+    {% endif %}
+
     <!-- 切換設備與週數 -->
     <div class="flex flex-wrap justify-between items-center mb-6 gap-4 bg-white p-4 rounded-xl shadow-sm border">
       <div class="flex items-center space-x-3">
@@ -36,7 +52,6 @@
         </select>
       </div>
 
-      <!-- 切換週次 -->
       <div class="flex items-center space-x-2">
         <a href="/calendar?equipment_id={{ selected_equipment.id if selected_equipment else '' }}&week_offset={{ week_offset - 1 }}" class="px-3 py-1 border rounded bg-white hover:bg-slate-50 text-sm">上一週</a>
         <span class="font-semibold px-2 text-slate-700">
@@ -51,7 +66,7 @@
 
     {% if not selected_equipment %}
     <div class="bg-amber-50 p-6 rounded-lg text-amber-700 text-center border border-amber-200">
-      您目前沒有任何機台的預約權限，請聯絡管理員為您開通！
+      您目前沒有任何機台的預約權限，請聯絡該機台負責人或管理員為您開通！
     </div>
     {% else %}
     <!-- 2小時時段週曆表 -->
@@ -86,13 +101,16 @@
                     <span class="font-bold text-rose-700 block truncate">{{ booking.booker_name or booking.user.name }}</span>
                     <span class="text-slate-500 block truncate text-[11px]">{{ booking.purpose or '實驗預約' }}</span>
                   </div>
+                  <!-- 只有預約者本人或 ADMIN 可以看見並執行取消 -->
                   {% if current_user.role == 'ADMIN' or current_user.id == booking.user_id %}
                   <form action="/cancel-booking" method="post" class="mt-1" onsubmit="return confirm('確定取消此筆預約？')">
                     <input type="hidden" name="booking_id" value="{{ booking.id }}">
                     <input type="hidden" name="equipment_id" value="{{ selected_equipment.id }}">
                     <input type="hidden" name="week_offset" value="{{ week_offset }}">
-                    <button type="submit" class="text-[10px] text-rose-600 hover:text-rose-800 underline">取消預約</button>
+                    <button type="submit" class="text-[10px] text-rose-600 hover:text-rose-800 underline font-semibold">取消預約</button>
                   </form>
+                  {% else %}
+                  <span class="text-[10px] text-slate-400">已預約</span>
                   {% endif %}
                 </div>
               {% else %}
@@ -110,8 +128,8 @@
     {% endif %}
   </main>
 
-  <!-- 點擊預約彈跳視窗 (Modal) -->
-  <div id="bookingModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4">
+  <!-- 預約彈窗 -->
+  <div id="bookingModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
     <div class="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border">
       <h3 class="text-lg font-bold text-slate-800 mb-2">確認預約機台</h3>
       <p class="text-sm text-slate-500 mb-4">
@@ -125,10 +143,9 @@
         <input type="hidden" name="date_str" id="modalDateStr">
         <input type="hidden" name="slot_idx" id="modalSlotIdx">
 
-        <!-- 必填預約人姓名 -->
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1">
-            預約人姓名 <span class="text-rose-500">*</span>
+            預約人姓名 <span class="text-rose-500">* (必填)</span>
           </label>
           <input type="text" name="user_name" required value="{{ current_user.name }}" placeholder="請輸入姓名" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
         </div>
@@ -146,6 +163,28 @@
     </div>
   </div>
 
+  <!-- 修改密碼彈窗 -->
+  <div id="passwordModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border">
+      <h3 class="text-lg font-bold text-slate-800 mb-3">更改個人密碼</h3>
+      <form action="/change-password" method="post" class="space-y-3">
+        <input type="hidden" name="redirect_to" value="/calendar">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">目前舊密碼</label>
+          <input type="password" name="old_password" required placeholder="••••••••" class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">設定新密碼</label>
+          <input type="password" name="new_password" required placeholder="••••••••" class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="flex justify-end space-x-2 pt-2">
+          <button type="button" onclick="closeChangePasswordModal()" class="px-3 py-1.5 border rounded-lg text-xs text-slate-600">取消</button>
+          <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium">確認修改</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
     function openBookingModal(dateStr, slotIdx, timeRange) {
       document.getElementById('modalDateStr').value = dateStr;
@@ -157,6 +196,14 @@
     function closeBookingModal() {
       document.getElementById('bookingModal').classList.add('hidden');
       document.getElementById('bookingModal').classList.remove('flex');
+    }
+    function openChangePasswordModal() {
+      document.getElementById('passwordModal').classList.remove('hidden');
+      document.getElementById('passwordModal').classList.add('flex');
+    }
+    function closeChangePasswordModal() {
+      document.getElementById('passwordModal').classList.add('hidden');
+      document.getElementById('passwordModal').classList.remove('flex');
     }
   </script>
 </body>
