@@ -77,6 +77,7 @@ class Booking(Base):
     id = Column(Integer, primary_key=True, index=True)
     equipment_id = Column(Integer, ForeignKey("equipments.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    booker_name = Column(String, nullable=True)  # 新增：預約時填寫的姓名
     start_time = Column(DateTime, nullable=False)
     end_time = Column(DateTime, nullable=False)
     purpose = Column(String, nullable=True)
@@ -84,8 +85,6 @@ class Booking(Base):
 
     equipment = relationship("Equipment", back_populates="bookings")
     user = relationship("User", back_populates="bookings")
-
-Base.metadata.create_all(bind=engine)
 
 # ================= 權限相依 =================
 def get_db():
@@ -231,6 +230,7 @@ def make_booking(
     equipment_id: int = Form(...),
     date_str: str = Form(...),
     slot_idx: int = Form(...),
+    user_name: str = Form(...),  # 新增：接收必填姓名
     purpose: str = Form(""),
     week_offset: int = Form(0),
     db: Session = Depends(get_db),
@@ -244,6 +244,7 @@ def make_booking(
     start_dt = datetime.strptime(f"{date_str} {start_str}", "%Y-%m-%d %H:%M")
     end_dt = datetime.strptime(f"{date_str} {end_str}", "%Y-%m-%d %H:%M")
 
+    # 檢查是否被預約
     conflict = db.query(Booking).filter(
         Booking.equipment_id == equipment_id,
         Booking.status == "CONFIRMED",
@@ -252,9 +253,11 @@ def make_booking(
     if conflict:
         return RedirectResponse(url=f"/calendar?equipment_id={equipment_id}&week_offset={week_offset}&error=該時段已被預約", status_code=303)
 
+    # 建立預約（存入填寫的預約人姓名）
     new_booking = Booking(
         equipment_id=equipment_id,
         user_id=current_user.id,
+        booker_name=user_name.strip(),
         start_time=start_dt,
         end_time=end_dt,
         purpose=purpose
@@ -262,7 +265,6 @@ def make_booking(
     db.add(new_booking)
     db.commit()
     return RedirectResponse(url=f"/calendar?equipment_id={equipment_id}&week_offset={week_offset}", status_code=303)
-
 @app.post("/cancel-booking")
 def cancel_booking(
     booking_id: int = Form(...),
